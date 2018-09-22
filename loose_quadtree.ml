@@ -66,14 +66,12 @@ module Node = struct
     ; data = []
     }
 
-  let insert_value t aabb value =
-    match t with
-    | Leaf -> Tree { empty_tree with data = [ aabb, value ] }
-    | Tree tree -> Tree { tree with data = (aabb, value) :: tree.data }
-
   let rec insert t aabb value ~aabb_square ~node_square =
     if Float.(Bounding_square.size aabb_square < Bounding_square.size node_square)
-    then insert_value t aabb value
+    then
+      match t with
+      | Leaf -> Tree { empty_tree with data = [ aabb, value ] }
+      | Tree tree -> Tree { tree with data = (aabb, value) :: tree.data }
     else
       let tree = match t with
         | Leaf -> empty_tree
