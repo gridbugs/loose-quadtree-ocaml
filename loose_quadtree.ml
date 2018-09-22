@@ -77,20 +77,35 @@ module Node = struct
         | Leaf -> empty_tree
         | Tree tree -> tree
       in
-      let subnode, node_corner_square =
+      let subnode, node_corner_square, update =
         let aabb_x, aabb_y = Bounding_square.centre aabb_square in
         let node_x, node_y = Bounding_square.centre node_square in
         if Float.(aabb_x < node_x)
         then
           if Float.(aabb_y < node_y)
-          then tree.top_left, Bounding_square.top_left node_square
-          else tree.bottom_left, Bounding_square.bottom_left node_square
+          then
+            tree.top_left,
+            Bounding_square.top_left node_square,
+            fun subnode -> { tree with top_left = subnode }
+          else
+            tree.bottom_left,
+            Bounding_square.bottom_left node_square,
+            fun subnode -> { tree with bottom_left = subnode }
         else
           if Float.(aabb_y < node_y)
-          then tree.top_right, Bounding_square.top_right node_square
-          else tree.bottom_right, Bounding_square.bottom_right node_square
+          then
+            tree.top_right,
+            Bounding_square.top_right node_square,
+            fun subnode -> { tree with top_right = subnode }
+          else
+            tree.bottom_right,
+            Bounding_square.bottom_right node_square,
+            fun subnode -> { tree with bottom_right = subnode }
       in
-      insert subnode aabb value ~aabb_square ~node_square:node_corner_square
+      let subnode =
+        insert subnode aabb value ~aabb_square ~node_square:node_corner_square
+      in
+      Tree (update subnode)
 end
 
 type 'a t =
