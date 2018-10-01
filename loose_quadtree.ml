@@ -1,6 +1,6 @@
 open! Core
 
-module Aabb = struct
+module Bounding_rect = struct
   type t =
     { centre : (float * float)
     ; width : float
@@ -9,10 +9,12 @@ module Aabb = struct
 
   let create = Fields.create
 
-  let create_top_left ~x ~y ~width ~height =
+  let create_with_top_left ~x ~y ~width ~height =
     let centre_x = x +. width /. 2. in
     let centre_y = y +. height /. 2. in
     { centre = (centre_x, centre_y) ; width ; height }
+
+  let max_dimension t = Float.max t.width t.height
 end
 
 module Bounding_square = struct
@@ -25,12 +27,12 @@ module Bounding_square = struct
     let half_size = size /. 2. in
     { centre = (half_size, half_size) ; size }
 
-  let of_aabb aabb =
-    let centre = Aabb.centre aabb in
-    let size = Float.max (Aabb.width aabb) (Aabb.height aabb) in
+  let of_bounding_rect bounding_rect =
+    let centre = Bounding_rect.centre bounding_rect in
+    let size = Bounding_rect.max_dimension bounding_rect in
     { centre ; size }
 
-  let to_aabb { centre ; size } = Aabb.create ~centre ~width:size ~height:size
+  let to_bounding_rect { centre ; size } = Bounding_rect.create ~centre ~width:size ~height:size
 
   let corner { centre = (x, y) ; size } x_sign y_sign =
     let offset = size /. 4. in
@@ -45,6 +47,21 @@ module Bounding_square = struct
   let bottom_right t = corner t 1. 1.
 end
 
+module To_insert = struct
+  type 'a t =
+    { bounding_rect : Bounding_rect.t
+    ; value : 'a
+    } [@@deriving fields]
+
+  let create = Fields.create
+
+  let bounding_square t = Bounding_square.of_bounding_rect (t.bounding_rect)
+
+  let max_dimension t = Bounding_rect.max_dimension t.bounding_rect
+
+  let centre t = Bounding_rect.centre t.bounding_rect
+end
+
 module Node = struct
   type 'a t =
     | Leaf
@@ -55,7 +72,7 @@ module Node = struct
     ; top_right : 'a t
     ; bottom_left : 'a t
     ; bottom_right : 'a t
-    ; data : (Aabb.t * 'a) list
+    ; data : (Bounding_rect.t * 'a) list
     } [@@deriving sexp_of]
 
   let empty_tree =
@@ -66,46 +83,36 @@ module Node = struct
     ; data = []
     }
 
-  let rec insert t aabb value ~aabb_square ~node_square =
-    if Float.(Bounding_square.size aabb_square < Bounding_square.size node_square)
+  let rec insert t ~node_square ({ To_insert.bounding_rect; value } as to_insert)  =
+    if Float.(Bounding_rect.max_dimension bounding_rect < Bounding_square.size node_square)
     then
       match t with
-      | Leaf -> Tree { empty_tree with data = [ aabb, value ] }
-      | Tree tree -> Tree { tree with data = (aabb, value) :: tree.data }
+      | Leaf -> Tree { empty_tree with data = [ bounding_rect, value ] }
+      | Tree tree -> Tree { tree with data = (bounding_rect, value) :: tree.data }
     else
       let tree = match t with
         | Leaf -> empty_tree
         | Tree tree -> tree
       in
-      let subnode, node_corner_square, update =
-        let aabb_x, aabb_y = Bounding_square.centre aabb_square in
-        let node_x, node_y = Bounding_square.centre node_square in
-        if Float.(aabb_x < node_x)
+      let bounding_rect_x, bounding_rect_y = Bounding_rect.centre bounding_rect in
+      let node_x, node_y = Bounding_square.centre node_square in
+      if Float.(bounding_rect_x < node_x)
+      then
+        if Float.(bounding_rect_y < node_y)
         then
-          if Float.(aabb_y < node_y)
-          then
-            tree.top_left,
-            Bounding_square.top_left node_square,
-            fun subnode -> { tree with top_left = subnode }
-          else
-            tree.bottom_left,
-            Bounding_square.bottom_left node_square,
-            fun subnode -> { tree with bottom_left = subnode }
+          let node_square = Bounding_square.top_left node_square in
+          Tree { tree with top_left = insert tree.top_left ~node_square to_insert }
         else
-          if Float.(aabb_y < node_y)
-          then
-            tree.top_right,
-            Bounding_square.top_right node_square,
-            fun subnode -> { tree with top_right = subnode }
-          else
-            tree.bottom_right,
-            Bounding_square.bottom_right node_square,
-            fun subnode -> { tree with bottom_right = subnode }
-      in
-      let subnode =
-        insert subnode aabb value ~aabb_square ~node_square:node_corner_square
-      in
-      Tree (update subnode)
+          let node_square = Bounding_square.bottom_left node_square in
+          Tree { tree with bottom_left = insert tree.bottom_left ~node_square to_insert }
+      else
+        if Float.(bounding_rect_y < node_y)
+        then
+          let node_square = Bounding_square.top_right node_square in
+          Tree { tree with top_right = insert tree.top_right ~node_square to_insert }
+        else
+          let node_square = Bounding_square.bottom_right node_square in
+          Tree { tree with bottom_right = insert tree.bottom_right ~node_square to_insert }
 end
 
 type 'a t =
@@ -133,15 +140,15 @@ let grow_to_fit t bounding_square =
   in
   grow_to_size t target_size
 
-let insert t aabb value =
-  let aabb_square = Bounding_square.of_aabb aabb in
-  let t = grow_to_fit t aabb_square in
+let insert t bounding_rect value =
+  let to_insert = To_insert.create ~bounding_rect ~value in
+  let t = grow_to_fit t (To_insert.bounding_square to_insert) in
   let node_square = Bounding_square.with_corner_at_origin t.size in
-  let root = Node.insert t.root aabb value ~aabb_square ~node_square in
+  let root = Node.insert t.root ~node_square to_insert in
   { t with root }
 
 let%expect_test "insert" =
-  let a = Aabb.create_top_left ~x:42. ~y:27. ~width:51. ~height:9. in
+  let a = Bounding_rect.create_with_top_left ~x:42. ~y:27. ~width:51. ~height:9. in
   let t = empty_with_initial_size 32. in
   let t = insert t a "a" in
   printf !"%{sexp:string t}\n" t;
