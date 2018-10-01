@@ -142,43 +142,50 @@ end = struct
           Tree { tree with se = insert tree.se ~node_square to_insert }
 end
 
-type 'a t =
-  { root : 'a Node.t
-  ; size : float
-  } [@@deriving sexp_of]
+module Quadtree : sig
+  type 'a t [@@deriving sexp_of]
 
-let empty_with_initial_size size = { root = Node.empty ; size }
+  val empty_with_initial_size : float -> 'a t
+  val insert : 'a t -> Bounding_rect.t -> 'a -> 'a t
+end = struct
+  type 'a t =
+    { root : 'a Node.t
+    ; size : float
+    } [@@deriving sexp_of]
 
-let rec grow_to_size { root ; size } target_size =
-  if target_size <= size
-  then { root ; size }
-  else
-    let root = Node.empty_with_nw root in
-    let next = { root ; size = size *. 2. } in
-    grow_to_size next target_size
+  let empty_with_initial_size size = { root = Node.empty ; size }
 
-let grow_to_fit t bounding_rect =
-  let centre_max_dimension =
-    let x, y = Bounding_rect.centre bounding_rect in
-    Float.max x y
-  in
-  let target_size =
-    Float.max centre_max_dimension (Bounding_rect.max_dimension bounding_rect)
-  in
-  grow_to_size t target_size
+  let rec grow_to_size { root ; size } target_size =
+    if target_size <= size
+    then { root ; size }
+    else
+      let root = Node.empty_with_nw root in
+      let next = { root ; size = size *. 2. } in
+      grow_to_size next target_size
 
-let insert t bounding_rect value =
-  let to_insert = To_insert.create ~bounding_rect ~value in
-  let t = grow_to_fit t bounding_rect in
-  let node_square = Node_square.create_with_corner_at_origin ~size:t.size in
-  let root = Node.insert t.root ~node_square to_insert in
-  { t with root }
+  let grow_to_fit t bounding_rect =
+    let centre_max_dimension =
+      let x, y = Bounding_rect.centre bounding_rect in
+      Float.max x y
+    in
+    let target_size =
+      Float.max centre_max_dimension (Bounding_rect.max_dimension bounding_rect)
+    in
+    grow_to_size t target_size
+
+  let insert t bounding_rect value =
+    let to_insert = To_insert.create ~bounding_rect ~value in
+    let t = grow_to_fit t bounding_rect in
+    let node_square = Node_square.create_with_corner_at_origin ~size:t.size in
+    let root = Node.insert t.root ~node_square to_insert in
+    { t with root }
+end
 
 let%expect_test "insert" =
   let a = Bounding_rect.create_with_nw ~x:42. ~y:27. ~width:51. ~height:9. in
-  let t = empty_with_initial_size 32. in
-  let t = insert t a "a" in
-  printf !"%{sexp:string t}\n" t;
+  let t = Quadtree.empty_with_initial_size 32. in
+  let t = Quadtree.insert t a "a" in
+  printf !"%{sexp:string Quadtree.t}\n" t;
   [%expect {|
     ((root
       (Tree
